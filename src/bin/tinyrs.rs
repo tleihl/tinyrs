@@ -33,17 +33,18 @@ fn app<P: AsRef<Path>>(filename: P, resolution: Resolution) -> Result<(), Box<dy
     let model = Model::from_file(filename)?;
 
     let renderer = Renderer::new(resolution);
+    let mut zbuffer = vec![f64::MIN; (resolution.width * resolution.height) as usize];
 
     let mut event_pump = sdl_context.event_pump()?;
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
 
-        canvas.set_draw_color(Color::RGB(0, 255, 128));
-
         for face in model.iter() {
-            renderer.render_face(&mut canvas, face)?;
+            renderer.render_face(&mut canvas, &mut zbuffer, face)?;
         }
+
+        zbuffer.fill(f64::MIN);
 
         for event in event_pump.poll_iter() {
             match event {

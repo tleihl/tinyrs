@@ -13,7 +13,8 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new<R: Into<Resolution>> (resolution: R) -> Self {
-        Renderer { resolution: resolution.into() }
+        let resolution = resolution.into();
+        Renderer { resolution }
     }
 
     pub fn render_line(&self, canvas: &mut WindowCanvas, p0: Point, p1: Point) -> Result<(), String> {
@@ -53,31 +54,46 @@ impl Renderer {
         Ok(())
     }
 
-    fn render_triangle_fn(&self, canvas: &mut WindowCanvas, triangle: Triangle,
+    fn render_triangle_fn(&self,
+                          canvas: &mut WindowCanvas,
+                          zbuffer: &mut Vec<f64>,
+                          triangle: &Triangle,
                           color_fn: impl Fn([f64; 3]) -> Color) -> Result<(), String> {
-        let mut min_x = (self.resolution.width - 1) as i32;
-        let mut min_y = (self.resolution.height - 1) as i32;
-        let mut max_x = 0i32;
-        let mut max_y = 0i32;
+        let mut min_x = self.resolution.width - 1;
+        let mut min_y = self.resolution.height - 1;
+        let mut max_x = 0u32;
+        let mut max_y = 0u32;
         for vertex in triangle.vertices() {
-            min_x = 0i32.max(min_x.min(vertex.x));
-            min_y = 0i32.max(min_y.min(vertex.y));
-            max_x = ((self.resolution.width - 1) as i32).min(max_x.max(vertex.x));
-            max_y = ((self.resolution.height - 1) as i32).min(max_y.max(vertex.y));
+            min_x = 0u32.max(min_x.min(vertex.x as u32));
+            min_y = 0u32.max(min_y.min(vertex.y as u32));
+            max_x = (self.resolution.width - 1).min(max_x.max(vertex.x as u32));
+            max_y = (self.resolution.height - 1).min(max_y.max(vertex.y as u32));
         }
 
         for x in min_x..=max_x {
             for y in min_y..=max_y {
-                if let Some(bcs)  = triangle.barycentric(Point::new(x, y)) {
-                    canvas.set_draw_color(color_fn(bcs));
-                    canvas.draw_point(Point::new(x, y))?;
+                if let Some(bcs)  = triangle.barycentric(Vec3f::new(x as f64, y as f64, 0f64)) {
+                    let z = triangle
+                        .vertices().iter()
+                        .zip(bcs)
+                        .map(|(v, g)| v.z * g)
+                        .sum::<f64>();
+                    let index = (x + self.resolution.width * y) as usize;
+                    if zbuffer[index] < z {
+                        zbuffer[index] = z;
+                        canvas.set_draw_color(color_fn(bcs));
+                        canvas.draw_fpoint((x as f32, y as f32))?;
+                    }
                 }
             }
         }
         Ok(())
     }
 
-    pub fn render_triangle(&self, canvas: &mut WindowCanvas, triangle: Triangle,
+    pub fn render_triangle(&self,
+                           canvas: &mut WindowCanvas,
+                           zbuffer: &mut Vec<f64>,
+                           triangle: &Triangle,
                            colors: [Vec3f; 3]) -> Result<(), String> {
         let color_fn = |bcs: [f64; 3]| {
             let color = colors.into_iter()
@@ -90,21 +106,24 @@ impl Renderer {
                        f64::clamp(color.y, 0.0, 255.0) as u8,
                        f64::clamp(color.z, 0.0, 255.0)  as u8)
         };
-        self.render_triangle_fn(canvas, triangle, color_fn)
+        self.render_triangle_fn(canvas, zbuffer, triangle, color_fn)
     }
 
-    pub fn render_face(&self, canvas: &mut WindowCanvas, face: &Face) -> Result<(), String> {
+    pub fn render_face(&self,
+                       canvas: &mut WindowCanvas,
+                       zbuffer: &mut Vec<f64>,
+                       face: &Face) -> Result<(), String> {
         if face.vertices.len() != 3 {
             return Ok(())
         }
 
-        let points = [
+        let [p1, p2, p3] = [
             face.vertices[0],
             face.vertices[1],
             face.vertices[2]
-        ].map(|vertex| self.to_point(&vertex));
+        ].map(|vertex| self.to_screen(&vertex));
 
-        let triangle = Triangle::from(points);
+        let triangle = Triangle::new(p1, p2, p3);
 
         if face.normals.len() != 3 {
             let colors = [
@@ -113,7 +132,7 @@ impl Renderer {
                 Vec3f::new(0.0, 0.0, 255.0),
             ];
 
-            self.render_triangle(canvas, triangle, colors)
+            self.render_triangle(canvas, zbuffer, &triangle, colors)
         } else {
             let light_direction = Vec3f::new(0.0, 0.0, 1.0);
 
@@ -128,16 +147,16 @@ impl Renderer {
                     .map(|(color, intensity)| color * intensity)
                     .collect::<Vec<Vec3f>>();
                 let colors = <[Vec3f; 3]>::try_from(maybe_colors.as_slice()).unwrap();
-                self.render_triangle(canvas, triangle, colors)
+                self.render_triangle(canvas, zbuffer, &triangle, colors)
             } else {
                 Ok(())
             }
         }
     }
 
-    fn to_point(&self, vertex: &Vec3f) -> Point {
+    fn to_screen(&self, vertex: &Vec3f) -> Vec3f {
         let x = self.resolution.width as f64 / 2.0 * (1.0 + vertex.x);
         let y = self.resolution.height as f64 / 2.0 * (1.0 + vertex.y);
-        Point::new(x as i32, y as i32)
+        Vec3f::new(x, y, vertex.z)
     }
 }
