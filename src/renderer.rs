@@ -3,7 +3,7 @@ use sdl2::render::WindowCanvas;
 use sdl2::rect::Point;
 
 use crate::common::Resolution;
-use crate::geometry::{Triangle, Vec3f};
+use crate::geometry::{Mat4x1f, Mat4x4f, Triangle, Vec3f};
 use crate::model::Face;
 
 #[derive(Default)]
@@ -112,7 +112,10 @@ impl Renderer {
     pub fn render_face(&self,
                        canvas: &mut WindowCanvas,
                        zbuffer: &mut Vec<f64>,
-                       face: &Face) -> Result<(), String> {
+                       light_direction: &Vec3f,
+                       face: &Face,
+                       view_port: Mat4x4f,
+                       projection: Mat4x4f) -> Result<(), String> {
         if face.vertices.len() != 3 {
             return Ok(())
         }
@@ -121,7 +124,7 @@ impl Renderer {
             face.vertices[0],
             face.vertices[1],
             face.vertices[2]
-        ].map(|vertex| self.to_screen(&vertex));
+        ].map(|v| (view_port * projection * Mat4x1f::from(v)).into());
 
         let triangle = Triangle::new(p1, p2, p3);
 
@@ -134,8 +137,6 @@ impl Renderer {
 
             self.render_triangle(canvas, zbuffer, &triangle, colors)
         } else {
-            let light_direction = Vec3f::new(0.0, 0.0, 1.0);
-
             let intensities = face.normals.iter()
                 .map(|normal| light_direction.dot(normal))
                 .filter(|&intensity| intensity > 0.0)
@@ -152,11 +153,5 @@ impl Renderer {
                 Ok(())
             }
         }
-    }
-
-    fn to_screen(&self, vertex: &Vec3f) -> Vec3f {
-        let x = self.resolution.width as f64 / 2.0 * (1.0 + vertex.x);
-        let y = self.resolution.height as f64 / 2.0 * (1.0 + vertex.y);
-        Vec3f::new(x, y, vertex.z)
     }
 }

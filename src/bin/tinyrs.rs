@@ -8,6 +8,7 @@ use sdl2::pixels::Color;
 use sdl2::event::Event;
 use tinyrs::canvas::CanvasBuilder;
 use tinyrs::common::Resolution;
+use tinyrs::geometry::{Mat4x4f, Vec3f};
 use tinyrs::renderer::Renderer;
 use tinyrs::model::Model;
 
@@ -35,13 +36,32 @@ fn app<P: AsRef<Path>>(filename: P, resolution: Resolution) -> Result<(), Box<dy
     let renderer = Renderer::new(resolution);
     let mut zbuffer = vec![f64::MIN; (resolution.width * resolution.height) as usize];
 
+    let light_direction = Vec3f::new(0.0, 0.0, 1.0);
+
+    let mut camera = Vec3f::new(0.0,0.0,3.0);
+
+    let view_port = Mat4x4f::viewport(
+        resolution.width as f64 / 8.0,
+        resolution.height as f64 / 8.0,
+        resolution.width as f64 * 3.0 / 4.0,
+        resolution.height as f64 * 3.0 / 4.0
+    );
+
     let mut event_pump = sdl_context.event_pump()?;
     'running: loop {
         canvas.set_draw_color(Color::RGB(0, 0, 0));
         canvas.clear();
 
+        let projection = Mat4x4f::from([
+            1.0, 0.0,  0.0,            0.0,
+            0.0, 1.0,  0.0,            0.0,
+            0.0, 0.0,  1.0,            0.0,
+            0.0, 0.0, -1.0 / camera.z, 1.0,
+        ]);
+
         for face in model.iter() {
-            renderer.render_face(&mut canvas, &mut zbuffer, face)?;
+            renderer.render_face(&mut canvas, &mut zbuffer, &light_direction,
+                                 face, view_port, projection)?;
         }
 
         zbuffer.fill(f64::MIN);
@@ -52,6 +72,10 @@ fn app<P: AsRef<Path>>(filename: P, resolution: Resolution) -> Result<(), Box<dy
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
                 },
+                Event::MouseWheel { y, .. } => {
+                    camera.z += 0.25 * y.signum() as f64;
+                    camera.z = f64::clamp(camera.z, 2.0, 5.0);
+                }
                 _ => {}
             }
         }
